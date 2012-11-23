@@ -1,0 +1,108 @@
+只在 src/include 存在：chrt.h
+diff -r src-raw/include/Makefile src/include/Makefile
+3c3
+< INCS=	alloca.h ansi.h a.out.h ar.h assert.h configfile.h ctype.h \
+---
+> INCS=	chrt.h alloca.h ansi.h a.out.h ar.h assert.h configfile.h ctype.h \
+diff -r src-raw/include/minix/callnr.h src/include/minix/callnr.h
+32a33,34
+> /* add system call's define */
+> #define CHRT		31
+diff -r src-raw/include/minix/com.h src/include/minix/com.h
+1148a1149,1151
+> /*realtime message*/
+> #define SCHEDULING_CHRT		(SCHEDULING_BASE+6)
+> 
+diff -r src-raw/servers/pm/misc.c src/servers/pm/misc.c
+624a625,634
+> /*===========================================================================*
+>  *				chrt				     *
+>  *===========================================================================*/
+> PUBLIC int do_chrt()
+> {
+> 	m_in.m_source=mp->mp_endpoint;
+> 	m_in.m2_i1=mp->mp_endpoint;
+> 	return _taskcall(SCHED_PROC_NR,SCHEDULING_CHRT,&m_in);
+> }
+> 
+diff -r src-raw/servers/pm/proto.h src/servers/pm/proto.h
+62a63,64
+> /* declare */
+> _PROTOTYPE( int do_chrt, (void)				);
+diff -r src-raw/servers/pm/table.c src/servers/pm/table.c
+45c45,46
+< 	no_sys,		/* 31 = (stty)	*/
+---
+> 	/* choose a no_sys number */
+> 	do_chrt,		/* 31 = chrt	*/
+diff -r src-raw/servers/sched/main.c src/servers/sched/main.c
+57a58,61
+> 		/* chrt message */
+> 		case SCHEDULING_CHRT:
+> 			result = do_change_realtime(&m_in);
+> 			break;
+diff -r src-raw/servers/sched/proto.h src/servers/sched/proto.h
+17a18,20
+> /* method declare */
+> _PROTOTYPE( int do_change_realtime, (message *m_ptr)			);
+> 
+diff -r src-raw/servers/sched/schedproc.h src/servers/sched/schedproc.h
+21a22,23
+> 	long deadline;/*deadline*/
+> 
+diff -r src-raw/servers/sched/schedule.c src/servers/sched/schedule.c
+41d40
+< 
+43c42,48
+< 	if (rmp->priority < MIN_USER_Q) {
+---
+> 	/* redistribute quantum to realtime process */
+> 	if (rmp->deadline!=0)
+> 	{
+> 		rmp->deadline-=(rmp->time_slice);
+> 		rmp->time_slice=DEFAULT_USER_TIME_SLICE+(20000000/rmp->deadline); 
+> 	}
+> 	else if (rmp->priority < MIN_USER_Q) {
+72a78,80
+> 	
+> 	/* reset deadline */
+> 	rmp->deadline=0;
+100a109,112
+> 
+> 	/* reset deadline */
+> 	rmp->deadline=0;
+> 
+249,250c261,262
+< 	for (proc_nr=0, rmp=schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
+< 		if (rmp->flags & IN_USE) {
+---
+> 	for (proc_nr=0, rmp=schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) { 
+> 		if ((rmp->flags & IN_USE)&&rmp->deadline==0) {/*not realtime*/
+259a272,298
+> 
+> /*method realization*/
+> PUBLIC int do_change_realtime(message *m_ptr)
+> {
+> 	register struct schedproc *rmp;
+> 	int proc_nr_n;
+> 	if(sched_isokendpt(m_ptr->m2_i1,&proc_nr_n)!=OK)
+> 	{
+> 		printf("SCHED:WARING:got an invaild endpoint!\n");
+> 		return EBADEPT;
+> 	}
+> 
+> 	rmp=&schedproc[proc_nr_n];
+> 	rmp->deadline=m_ptr->m2_l1;
+> 	if(rmp->deadline==0)
+> 	{
+> 		rmp->time_slice=DEFAULT_USER_TIME_SLICE;
+> 	}
+> 	else
+> 	{
+> 		rmp->priority=USER_Q;
+> 		/*change that number to adjust the time slice*/
+> 		rmp->time_slice=DEFAULT_USER_TIME_SLICE+(20000000/rmp->deadline); 
+> 	}
+> 	return 0;
+> }
+> 
